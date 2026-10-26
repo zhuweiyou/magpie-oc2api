@@ -1,0 +1,44 @@
+{
+  "name": "magpie-oc2api",
+  "version": "0.2.0",
+  "description": "OpenCode / magpie provider plugin: signs in to Vercel and spreads oc2api requests over every oc2api project on that account",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "seats.mjs",
+    "models.mjs",
+    "vercel.mjs",
+    "store.mjs",
+    "page/index.html",
+    "page/app.js",
+    "page/style.css",
+    "page/icon.svg",
+    "README.md"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "magpie",
+    "vercel",
+    "oc2api",
+    "opencode-zen"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/plugin.test.mjs"
+  },
+  "magpie": {
+    "page": {
+      "title": "oc2api on Vercel",
+      "titles": {
+        "zh": "oc2api on Vercel",
+        "zh-TW": "oc2api on Vercel",
+        "ja": "oc2api on Vercel"
+      },
+      "file": "page/index.html",
+      "icon": "page/icon.svg"
+    }
+  }
+}

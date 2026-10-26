@@ -1,0 +1,135 @@
+:root {
+  --gap: 12px;
+}
+
+body {
+  margin: 0;
+  padding: 20px 22px 40px;
+  max-width: 780px;
+  color: var(--magpie-fg, #1c1c1e);
+  background: var(--magpie-bg, transparent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+header h1 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.lede {
+  margin: 0;
+  color: var(--magpie-muted, #6b6b70);
+  font-size: 12.5px;
+}
+
+h2 {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--magpie-faint, #8a8a90);
+}
+
+.note {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--magpie-line, #e3e3e6);
+  border-radius: 10px;
+  background: var(--magpie-card, rgba(127, 127, 127, 0.04));
+}
+
+.note h2 {
+  margin-top: 0;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.steps li {
+  margin: 5px 0;
+}
+
+.steps b {
+  font-weight: 600;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 9px 12px;
+  border: 1px solid var(--magpie-line, #e3e3e6);
+  border-radius: 9px;
+  margin-bottom: 8px;
+  background: var(--magpie-card, transparent);
+}
+
+.row.mine {
+  border-color: var(--magpie-accent, #3b82f6);
+}
+
+.who {
+  min-width: 0;
+}
+
+.name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  color: var(--magpie-muted, #6b6b70);
+  font-size: 11.5px;
+  font-family: var(--magpie-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.empty,
+.count {
+  color: var(--magpie-muted, #6b6b70);
+  font-size: 12px;
+  padding: 8px 2px;
+}
+
+.error {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--magpie-red, #dc2626) 12%, transparent);
+  color: var(--magpie-red, #dc2626);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+footer {
+  margin-top: 26px;
+  padding-top: 12px;
+  border-top: 1px solid var(--magpie-line, #e3e3e6);
+  color: var(--magpie-faint, #8a8a90);
+  font-size: 11.5px;
+}
+
+footer p {
+  margin: 0;
+}
+
+.readonly {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px dashed var(--magpie-line, #e3e3e6);
+  color: var(--magpie-faint, #8a8a90);
+  font-size: 11.5px;
+}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oc2api on Vercel</title>
+<link rel="stylesheet" href="style.css">
+<script src="_magpie/bridge.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1 data-t="title">oc2api on Vercel</h1>
+  <p class="lede" data-t="lede">Sign in to Vercel once: every project named oc2api* becomes a seat, rotated automatically.</p>
+</header>
+
+<section class="note">
+  <h2 data-t="how">How it works</h2>
+  <ol class="steps">
+    <li data-t="step1">Sign in once per Vercel account in the provider row.</li>
+    <li data-t="step2">Every Vercel project whose name mentions oc2api is taken as a seat.</li>
+    <li data-t="step3">Requests rotate over the seats, skipping one that is out of its free tier.</li>
+  </ol>
+  <p class="readonly" data-t="deploy">This plugin never deploys or changes a project: it only reads.</p>
+</section>
+
+<section>
+  <h2 data-t="providers">Signed in</h2>
+  <ul id="providers" class="list"><li class="empty" data-t="loading">Reading…</li></ul>
+  <p class="error" id="error" hidden></p>
+</section>
+
+<footer>
+  <p data-t="limits">This page can only read the names of your providers.</p>
+</footer>
+</body>
+</html>
