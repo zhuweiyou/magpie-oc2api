@@ -12,6 +12,9 @@ const MATCH = /oc2api/i
 
 // projectsOf turns Vercel's project list into the projects this plugin
 // spreads over: name-matched, with the production alias each one answers on.
+//
+// A record that came from the account file carries its key, so the key is not
+// asked for again; one that came from Vercel's API carries none.
 export function projectsOf(projects) {
   return projects
     .filter((p) => MATCH.test(p.name))
@@ -19,7 +22,10 @@ export function projectsOf(projects) {
       id: p.id,
       name: p.name,
       origin: p.origin,
-      key: "",
+      key: typeof p.key === "string" ? p.key : "",
+      // "the key is known": "" means Vercel was asked and had none, which is
+      // an answer too, so a project with no API_KEY isn't asked every run
+      asked: typeof p.key === "string",
       ok: true,
       why: "",
       // the pool's bookkeeping, reset whenever projects are re-read
@@ -86,11 +92,11 @@ export class Projects {
   }
 
   replace(list) {
-    // keep what belongs to the project rather than to this reading of the
-    // Vercel list: the counters, the resting state, and the API_KEY. Dropping
-    // the key here is what made a refresh report hasKey false for every
-    // project while the key was still in Vercel: the key is read once and
-    // kept, and this list is replaced whenever Vercel is read again.
+    // Keep what belongs to the project rather than to this reading of the
+    // Vercel list: the counters, the resting state, and the API_KEY with
+    // whether the key is known. Vercel's own project list carries no key, so
+    // a replace that took its records whole would lose the key of every
+    // project that already had one.
     const before = new Map(this.list.map((p) => [p.id, p]))
     this.list = list.map((p) => {
       const old = before.get(p.id)
@@ -98,6 +104,7 @@ export class Projects {
       return {
         ...p,
         key: old.key,
+        asked: old.asked,
         sent: old.sent,
         failedAt: old.failedAt,
         restMs: old.restMs,
@@ -114,9 +121,9 @@ export class Projects {
   }
 
   byHost(host) {
-    return this.list.find((s) => {
+    return this.list.find((p) => {
       try {
-        return new URL(s.origin).host === host
+        return new URL(p.origin).host === host
       } catch {
         return false
       }

@@ -4,7 +4,7 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -229,79 +229,57 @@ test("store keeps an account's projects across runs", async () => {
   }
 })
 
-test("a key is written down once, and read from disk after that", async () => {
-  // Vercel is asked for a key once. After that the plugin answers from its
-  // own directory, so a restart, or Vercel being down, asks nothing.
+test("a key is written with its project, and read back after that", async () => {
+  // Vercel is asked for a key once. After that a run answers from the one
+  // file, so a restart, or Vercel being down, asks nothing.
   const dir = await mkdtemp(join(tmpdir(), "oc2api-keys-"))
   try {
     const store = new Store(dir)
-    assert.equal(await store.key("prj_1"), null, "never asked yet")
-    await store.saveKey("prj_1", "sk-test-1", { source: "vercel" })
-    const read = await new Store(dir).key("prj_1")
-    assert.equal(read.key, "sk-test-1")
-    assert.equal(read.source, "vercel")
+    await store.saveAccount("i@example.com", {
+      projects: [
+        { id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app", hasKey: true, key: "sk-test-1" },
+      ],
+    })
+    const read = await new Store(dir).account("i@example.com")
+    assert.equal(read.projects[0].key, "sk-test-1")
+    assert.equal(read.projects[0].hasKey, true)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-test("a project with no key is written down as none, not left unanswered", async () => {
-  // "" is an answer: without a record the plugin would ask Vercel again on
-  // every run, forever, for a project that has no API_KEY
+test("a project with no key keeps that answer, so it isn't asked again", async () => {
+  // "" is an answer: without it the plugin would ask Vercel again on every
+  // run, forever, for a project that has no API_KEY
   const dir = await mkdtemp(join(tmpdir(), "oc2api-nokey-"))
   try {
     const store = new Store(dir)
-    await store.saveKey("prj_2", "")
-    const read = await new Store(dir).key("prj_2")
-    assert.ok(read, "the answer is kept")
-    assert.equal(read.key, "")
-    assert.deepEqual(Object.keys(await new Store(dir).keys()), ["prj_2"])
+    await store.saveAccount("i@example.com", {
+      projects: [{ id: "prj_2", name: "oc2api-b", origin: "https://oc2api-b.vercel.app", hasKey: false, key: "" }],
+    })
+    const read = await new Store(dir).account("i@example.com")
+    assert.equal(read.projects[0].key, "")
+    const p = projectsOf(read.projects)[0]
+    assert.equal(p.asked, true, "a written-down \"no key\" counts as answered")
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
 
-test("the key file is private to the account that runs magpie", async () => {
+test("the account file is private to the account that runs magpie", async () => {
+  // it holds a plaintext API_KEY, so it is written 0600
   const dir = await mkdtemp(join(tmpdir(), "oc2api-mode-"))
   try {
     const store = new Store(dir)
-    await store.saveKey("prj_3", "sk-test-3")
+    await store.saveAccount("i@example.com", {
+      projects: [{ id: "prj_3", name: "oc2api-c", origin: "https://oc2api-c.vercel.app", key: "sk-test-3" }],
+    })
+    const path = join(dir, "oc2api-vercel", "accounts", "i@example.com.json")
     if (process.platform !== "win32") {
-      const st = await stat(join(dir, "oc2api-vercel", "keys", "prj_3.json"))
+      const st = await stat(path)
       assert.equal(st.mode & 0o777, 0o600, "a key is not for other users to read")
     }
-    const text = await readFile(join(dir, "oc2api-vercel", "keys", "prj_3.json"), "utf8")
-    assert.match(text, /"key": "sk-test-3"/)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-test("a file v0.2 wrote is read as one list, and the next write drops the copy", async () => {
-  // v0.2 wrote the same projects twice: a `projects` map and a `seats` list.
-  // Reading the file has to find the list either way, and writing it back
-  // has to leave one of them.
-  const dir = await mkdtemp(join(tmpdir(), "oc2api-one-"))
-  try {
-    const path = join(dir, "oc2api-vercel", "accounts", "i@example.com.json")
-    await mkdir(join(dir, "oc2api-vercel", "accounts"), { recursive: true })
-    await writeFile(
-      path,
-      JSON.stringify({
-        email: "i@example.com",
-        projects: { prj_1: { name: "oc2api-us" } },
-        seats: [{ id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app", hasKey: true }],
-      }),
-    )
-    const store = new Store(dir)
-    const read = await store.account("i@example.com")
-    assert.ok(Array.isArray(read.projects), "the list is found in the older field")
-    assert.equal(read.projects[0].name, "oc2api-us")
-
-    await store.saveAccount("i@example.com", { projects: read.projects })
-    const after = JSON.parse(await readFile(path, "utf8"))
-    assert.deepEqual(Object.keys(after).sort(), ["email", "projects", "readAt"])
-    assert.equal(after.projects.length, 1)
+    assert.match(await readFile(path, "utf8"), /"key": "sk-test-3"/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -374,6 +352,72 @@ test("the config hook offers the known models before any project answers", async
 
 
 
+
+test("a key Vercel won't change is refused twice, not retried forever", async () => {
+  // The 401 path re-reads every key once. If Vercel hands back the same key,
+  // nothing about the deployment changed, so the projects rest instead of
+  // every request asking again: the second request must not reach a project
+  // at all, and must say the key was refused rather than the free tier.
+  const dir = await mkdtemp(join(tmpdir(), "oc2api-401-"))
+  const realFetch = globalThis.fetch
+  let hits = 0
+  let pulls = 0
+  globalThis.fetch = async (url) => {
+    const s = String(url)
+    if (s.includes("/v9/projects")) {
+      return new Response(
+        JSON.stringify({
+          projects: [
+            { id: "prj_a", name: "oc2api-a", targets: { production: { alias: ["oc2api-a.vercel.app"] } } },
+            { id: "prj_b", name: "oc2api-b", targets: { production: { alias: ["oc2api-b.vercel.app"] } } },
+          ],
+        }),
+        { status: 200 },
+      )
+    }
+    if (s.includes("/v3/env/pull")) {
+      pulls++
+      return new Response(JSON.stringify({ env: { API_KEY: "sk-stable" } }), { status: 200 })
+    }
+    hits++
+    return new Response("no", { status: 401 })
+  }
+  try {
+    const saved = {
+      type: "oauth",
+      access: "tok",
+      refresh: "",
+      expires: Date.now() + 3600_000,
+      accountId: "i@example.com",
+    }
+    await writeFile(join(dir, "plugin-auth.json"), JSON.stringify({ oc2api: saved }))
+    const hooks = await (await import("../index.mjs")).Oc2apiVercelPlugin({
+      client: { app: { log() {} } },
+      directory: dir,
+    })
+    const cfg = { provider: {} }
+    await hooks.config(cfg)
+    const loader = await hooks.auth.loader(async () => saved)
+
+    // one attempt per project, then it gives up
+    const first = await loader.fetch("https://projects.oc2api.invalid/v1/x", { method: "POST" }).catch((e) => e)
+    assert.equal(first.status, 401, `said ${first.message}`)
+    assert.match(first.message, /refused its API_KEY|refused their API_KEY/)
+    assert.equal(hits, 2, `each project was tried once, not ${hits} times`)
+
+    // and the next request answers at once, without touching a project
+    hits = 0
+    pulls = 0
+    const second = await loader.fetch("https://projects.oc2api.invalid/v1/x", { method: "POST" }).catch((e) => e)
+    assert.equal(second.status, 401)
+    assert.equal(hits, 0, "a resting project must not be tried again")
+    assert.equal(pulls, 0, "nor must Vercel be asked again")
+    assert.doesNotMatch(second.message, /out of free tier/, "a key refusal is not a spent free tier")
+  } finally {
+    globalThis.fetch = realFetch
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 
 test("the loader says where requests go, or magpie refuses them outright", async () => {
   // magpie answers "says nowhere to send its requests" when a provider

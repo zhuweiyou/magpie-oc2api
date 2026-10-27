@@ -70,70 +70,57 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
   const store = new Store(directory)
 
   // The projects are read from Vercel rarely, and a run is served from what
-  // is already known: the account file and the keys written beside it in the
-  // plugin's directory. A Vercel account's projects and their API_KEY change
-  // only when someone changes them there, which is not a thing to poll for.
+  // is already known: the account file in the plugin's directory, which holds
+  // each project and its API_KEY. A Vercel account's projects and their keys
+  // change only when someone changes them there, which is not a thing to poll
+  // for.
   //
-  // So: at the start of a run the list on disk answers at once, and a read of
-  // Vercel is made quietly behind it — a success replaces both the list and
-  // the file, a failure leaves the run working on what it had. Signing in
-  // again reads it at once (a fresh account has nothing on disk), Check in
-  // now reads it at once (that is what the button is for), and a project that
-  // refuses its key (a 401) is the one thing that says a key was set anew.
-  const pools = new Map() // email -> { projects, keys, read, refreshing }
+  // So: at the start of a run the file answers at once, and a read of Vercel
+  // is made quietly behind it — a success replaces both the list and the file,
+  // a failure leaves the run working on what it had. Signing in again reads it
+  // at once (a fresh account has nothing on disk), Check in now reads it at
+  // once (that is what the button is for), and a project that refuses its key
+  // (a 401) is the one thing that says a key was set anew.
+  const pools = new Map() // email -> { projects, read, refreshing }
   // fresh holds accounts that have just signed in: their next read of the
   // list is on the spot and not the quiet one behind a file
   const fresh = new Set()
 
-  // keyOf is the API_KEY of one project: from the pool, else from disk, else
-  // read from Vercel once and written down. A project with no API_KEY set is
-  // written down as "" too, so the question is asked once and not again.
-  async function keyOf(api, pool, project, { again = false } = {}) {
-    if (!again) {
-      if (pool.keys.has(project.id)) return pool.keys.get(project.id)
-      const held = await store.key(project.id).catch(() => null)
-      if (held) {
-        pool.keys.set(project.id, held.key)
-        return held.key
-      }
-    }
+  // keyOf is the API_KEY of one project: the one already known, else read
+  // from Vercel once. A project with no API_KEY set is kept as "" too, so the
+  // question is asked once and not again. `again` is a 401 having said the key
+  // changed: the old answer is not worth keeping.
+  async function keyOf(api, project, { again = false } = {}) {
+    if (!again && typeof project.key === "string" && (project.key || project.asked)) return project.key
     // one at a time: five parallel reads of env is what tripped a connect
     // limit during development
-    const key = await api.envValue(project.id, "API_KEY")
-    pool.keys.set(project.id, key)
-    await store.saveKey(project.id, key, { source: "vercel" }).catch(() => {})
-    return key
+    project.key = await api.envValue(project.id, "API_KEY")
+    project.asked = true
+    return project.key
   }
 
   // seed is what a run starts with: the account's projects as they were last
-  // written down, and the keys beside them. No network: this is what makes
-  // the first request after a restart cost nothing.
+  // written down, keys included. No network: this is what makes the first
+  // request after a restart cost nothing.
   async function seed(email) {
     const account = await store.account(email).catch(() => null)
     const projects = new Projects()
     projects.replace(projectsOf(Array.isArray(account?.projects) ? account.projects : []))
-    const keys = new Map()
-    for (const [id, rec] of Object.entries(await store.keys().catch(() => ({})))) {
-      keys.set(id, typeof rec?.key === "string" ? rec.key : "")
-    }
-    for (const project of projects.list) project.key = keys.get(project.id) ?? ""
-    return { projects, keys, read: false, refreshing: null }
+    return { projects, read: false, refreshing: null }
   }
 
-  // reread is the one read of Vercel: the account's projects, and every key
-  // it does not know yet (or every key, when `again`: a 401 means one was set
+  // reread is the one read of Vercel: the account's projects, and every key it
+  // does not know yet (or every key, when `again`: a 401 means one was set
   // anew). What came back is written down, so the next run needs no network.
   async function reread(auth, api, pool, { again = false } = {}) {
     pool.projects.replace(projectsOf(await api.projects()))
-    // a project deleted in Vercel keeps nothing; one added carries no key yet
-    for (const id of [...pool.keys.keys()]) if (!pool.projects.byId(id)) pool.keys.delete(id)
     for (const project of pool.projects.list) {
       try {
-        project.key = await keyOf(api, pool, project, { again })
+        await keyOf(api, project, { again })
       } catch {
         // Vercel couldn't answer: keep the key already known rather than
         // sending the project out with none, which oc2api answers with a 401
-        project.key = pool.keys.get(project.id) ?? project.key ?? ""
+        project.key = typeof project.key === "string" ? project.key : ""
       }
     }
     pool.read = true
@@ -141,7 +128,13 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
       .saveAccount(auth.email || "account", {
         userId: auth.userId,
         username: auth.username,
-        projects: pool.projects.list.map((p) => ({ id: p.id, name: p.name, origin: p.origin, hasKey: !!p.key })),
+        // the key is written with the project: one file, one list
+        projects: pool.projects.list.map((p) => ({
+          id: p.id,
+          name: p.name,
+          origin: p.origin,
+          key: p.key ?? "",
+        })),
       })
       .catch(() => {})
     return pool.projects
@@ -341,11 +334,12 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
 
             const candidates = () => (wanted ? [wanted] : projects)
 
-            // Every project is resting: the free tier of each exit was spent and
-            // each named when it comes back. Answer at once with that, rather
-            // than spending a round trip on each project to be told the same
-            // thing again (a spent window is hours long, so nothing can have
-            // recovered in between).
+            // Every project is resting: the free tier of each exit was spent, or
+            // each refused its key, and each named when it comes back. Answer at
+            // once with that, rather than spending a round trip on each project
+            // to be told the same thing again (a spent window is hours long, and
+            // a key Vercel still reports unchanged will still be refused, so
+            // nothing can have recovered in between).
             const live = candidates().filter((p) => healthy(p))
             if (!live.length) {
               const back = candidates()
@@ -354,16 +348,21 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
                 .sort((a, b) => a - b)[0]
               const soon = back ? ` · earliest back in ${humanFor(back - Date.now())}` : ""
               const n = candidates().length
-              throw Object.assign(
-                new Error(`${n} oc2api ${n === 1 ? "project" : "projects"} out of free tier${soon}`),
-                { status: 429 },
-              )
+              // a key Vercel wouldn't change is not something waiting fixes
+              const why = candidates().every((p) => /refused/i.test(p.why ?? ""))
+                ? `${n} oc2api ${n === 1 ? "project" : "projects"} refused their API_KEY — set API_KEY in Vercel, then Check in now`
+                : `${n} oc2api ${n === 1 ? "project" : "projects"} out of free tier${soon}`
+              throw Object.assign(new Error(why), {
+                status: /API_KEY/.test(why) ? 401 : 429,
+              })
             }
 
             const avoid = new Set()
             let lastError = ""
+            let lastStatus = 0
             let retryAfter = ""
             let refreshedProjects = false
+            let refusedKey = ""
 
             for (let attempt = 0; attempt < Math.min(candidates().length, 6); attempt++) {
               const project = choose(candidates(), avoid)
@@ -396,13 +395,12 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
                 const text = await res.clone().text().catch(() => "")
                 avoid.add(project.id)
                 lastError = `${project.name}: ${res.status}`
+                lastStatus = res.status
 
                 // A 401 is about the key, not the free tier: it is the one
                 // thing that says a key was set anew in Vercel. Ask Vercel
                 // once for every key again, write down what it says, and let
-                // this request try whatever changed. A project whose key comes
-                // back the same is not going to start working, so it sits
-                // out a minute instead of costing a round trip each request.
+                // this request try whatever changed.
                 if (res.status === 401) {
                   const sent = project.key
                   if (!refreshedProjects && !wanted) {
@@ -413,8 +411,20 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
                     } catch {}
                   }
                   const now = projects.find((p) => p.id === project.id)
-                  if (now && now.key !== sent) avoid.delete(project.id)
-                  else if (now) pool.markFailed(now, "401 the key was refused", 60_000)
+                  if (now && now.key !== sent) {
+                    // the key did change: this project is worth another try
+                    avoid.delete(project.id)
+                    continue
+                  }
+                  // the key came back the same. Vercel has nothing new to say,
+                  // so this is not a stale key that a re-read fixes: the
+                  // deployment rejects the key it was given. Asking again per
+                  // request would be the same question forever, so this one
+                  // rests — and if every project says the same, the whole
+                  // plugin rests with them, which is what the loop's exit
+                  // below reports.
+                  refusedKey = refusedKey || project.name
+                  if (now) pool.markFailed(now, "401 the key was refused", 60_000)
                   continue
                 }
 
@@ -445,6 +455,10 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
             // soonest one comes back: "429" alone reads like the request was
             // turned away once, when in truth the free tier of every exit was
             // spent, which is the one thing a reader needs to know.
+            //
+            // A refusal that was about the key says so instead, with the status
+            // the project gave (401): the free tier is not the reason, and
+            // telling the reader to wait would be false.
             const tried = avoid.size
             const total = candidates().length
             const back = projects
@@ -452,12 +466,14 @@ export async function Oc2apiVercelPlugin({ client: magpie, directory }) {
               .filter((t) => t > 0)
               .sort((a, b) => a - b)[0]
             const soon = back ? ` · next project in ${humanFor(back - Date.now())}` : ""
-            const why =
-              tried >= total
+            const allKey = !!refusedKey && lastStatus === 401
+            const why = allKey
+              ? `every oc2api project refused its API_KEY (${lastError}) — set API_KEY in Vercel, then Check in now`
+              : tried >= total
                 ? `${total} oc2api ${total === 1 ? "project" : "projects"} all refused (${lastError})${soon}`
                 : `${lastError}${soon}`
             throw Object.assign(new Error(why), {
-              status: 429,
+              status: allKey ? 401 : 429,
               retryAfter,
             })
           },
