@@ -22,6 +22,12 @@ const TEXT = {
     limits:
       "This page can only read the names of your providers, and names the one this plugin owns: the seats, their exit IPs and their health are on that provider's account card, and in the oc2api_seats tool.",
     deploy: "This plugin never deploys or changes a project: it only reads.",
+    repos: "The two repositories",
+    repoOc2api: "oc2api",
+    repoOc2apiSay:
+      "The thing you deploy to Vercel: one project per exit, each with its own free tier. Deploy it first; this plugin only reads what it finds.",
+    repoPlugin: "magpie-oc2api",
+    repoPluginSay: "This plugin: what it does, what it reads, and how to install it in another magpie.",
   },
   zh: {
     title: "oc2api on Vercel",
@@ -37,6 +43,12 @@ const TEXT = {
     limits:
       "这个页面只能读到供应商的名字，只写出这个插件自己的那一个。座位、它们的出口 IP 和健康状态在那个供应商的账号卡片上，以及 oc2api_seats 工具里。",
     deploy: "这个插件从不部署、也不修改你的项目：它只读。",
+    repos: "两个仓库",
+    repoOc2api: "oc2api",
+    repoOc2apiSay:
+      "要部署到 Vercel 的那个：一个项目一个出口，各有自己的免费额度。先部署它，这个插件只是读它扫到的东西。",
+    repoPlugin: "magpie-oc2api",
+    repoPluginSay: "这个插件本身：做什么、读什么、怎么在另一台 magpie 上装。",
   },
 }
 
