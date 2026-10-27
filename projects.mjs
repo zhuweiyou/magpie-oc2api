@@ -1,18 +1,18 @@
-// The seats: every Vercel project whose name mentions oc2api, each with its
-// own origin, key and exit IP.
+// The projects: every Vercel project whose name mentions oc2api, each with
+// its own origin and key.
 //
 // A project's API_KEY is read from Vercel rather than guessed: the env
 // endpoint that a build sees hands back plaintext, so a key set by hand
 // stays in use and this plugin never has to write one. A project that has
 // none is used without a key, which works whenever the deployment is
-// unauthenticated; if it isn't, the project says so and the next seat is
+// unauthenticated; if it isn't, the project says so and the next project is
 // tried.
 
 const MATCH = /oc2api/i
 
-// pick turns Vercel's project list into seats: name-matched, with the
-// production alias each one answers on.
-export function seatsOf(projects) {
+// projectsOf turns Vercel's project list into the projects this plugin
+// spreads over: name-matched, with the production alias each one answers on.
+export function projectsOf(projects) {
   return projects
     .filter((p) => MATCH.test(p.name))
     .map((p) => ({
@@ -20,24 +20,23 @@ export function seatsOf(projects) {
       name: p.name,
       origin: p.origin,
       key: "",
-      ip: "",
       ok: true,
       why: "",
-      // the pool's bookkeeping, reset whenever seats are re-read
+      // the pool's bookkeeping, reset whenever projects are re-read
       busy: 0,
       tried: 0,
       failedAt: 0,
       sent: 0,
     }))
-    .filter((s) => s.origin)
+    .filter((p) => p.origin)
 }
 
-// restFor says how long a failed seat should sit out. oc2api answers a spent
+// restFor says how long a failed project should sit out. oc2api answers a spent
 // free tier with a 429 whose Retry-After names the window exactly, and that
 // window is measured in hours (15 in practice), so guessing a couple of
 // minutes would mean retrying a spent exit every two minutes all day: the
-// seat would be re-probed hundreds of times, and each probe risks the
-// upstream counting it. So the header is followed, and only a seat that
+// project would be re-probed hundreds of times, and each probe risks the
+// upstream counting it. So the header is followed, and only a project that
 // named nothing falls back to a short rest.
 export function restFor(res) {
   const raw = res?.headers?.get?.("retry-after") ?? ""
@@ -49,23 +48,23 @@ export function restFor(res) {
   return 10 * 60_000
 }
 
-// healthy says whether a seat may take a request now.
-export function healthy(seat, now = Date.now()) {
-  return now - seat.failedAt > (seat.restMs ?? 10 * 60_000)
+// healthy says whether a project may take a request now.
+export function healthy(project, now = Date.now()) {
+  return now - project.failedAt > (project.restMs ?? 10 * 60_000)
 }
 
-// wakeAt is when a resting seat comes back, for the account card.
-export function wakeAt(seat) {
-  if (!seat.failedAt) return 0
-  return seat.failedAt + (seat.restMs ?? 10 * 60_000)
+// wakeAt is when a resting project comes back, for the account card.
+export function wakeAt(project) {
+  if (!project.failedAt) return 0
+  return project.failedAt + (project.restMs ?? 10 * 60_000)
 }
 
-// choose picks the seat to send a request to: the least loaded among the
+// choose picks the project to send a request to: the least loaded among the
 // healthy ones, and among equals the one that has sent least, so traffic
 // spreads over every exit rather than piling on the first. `avoid` holds the
-// seats this request has already failed on.
-export function choose(seats, avoid = new Set(), now = Date.now()) {
-  const open = seats.filter((s) => s.ok && !avoid.has(s.id))
+// projects this request has already failed on.
+export function choose(projects, avoid = new Set(), now = Date.now()) {
+  const open = projects.filter((s) => s.ok && !avoid.has(s.id))
   if (!open.length) return null
   const healthyOnes = open.filter((s) => healthy(s, now))
   const pool = healthyOnes.length ? healthyOnes : open
@@ -76,7 +75,7 @@ export function choose(seats, avoid = new Set(), now = Date.now()) {
   }, null)
 }
 
-export class Seats {
+export class Projects {
   constructor() {
     this.list = []
     this.readAt = 0
@@ -87,23 +86,21 @@ export class Seats {
   }
 
   replace(list) {
-    // keep what belongs to the seat rather than to this reading of the
-    // project list: the counters, the resting state, and the API_KEY read
-    // from Vercel. Dropping the key here is what made a refresh one minute
-    // later report hasKey false for every seat while the key was still in
-    // Vercel: the key is read on its own half-hour timer, and this list is
-    // replaced on a one-minute one.
-    const before = new Map(this.list.map((s) => [s.id, s]))
-    this.list = list.map((s) => {
-      const old = before.get(s.id)
-      if (!old) return s
+    // keep what belongs to the project rather than to this reading of the
+    // Vercel list: the counters, the resting state, and the API_KEY. Dropping
+    // the key here is what made a refresh report hasKey false for every
+    // project while the key was still in Vercel: the key is read once and
+    // kept, and this list is replaced whenever Vercel is read again.
+    const before = new Map(this.list.map((p) => [p.id, p]))
+    this.list = list.map((p) => {
+      const old = before.get(p.id)
+      if (!old) return p
       return {
-        ...s,
+        ...p,
         key: old.key,
         sent: old.sent,
         failedAt: old.failedAt,
         restMs: old.restMs,
-        ip: old.ip,
         ok: old.ok,
         why: old.why,
       }
@@ -113,7 +110,7 @@ export class Seats {
   }
 
   byId(id) {
-    return this.list.find((s) => s.id === id)
+    return this.list.find((p) => p.id === id)
   }
 
   byHost(host) {
@@ -126,16 +123,16 @@ export class Seats {
     })
   }
 
-  markFailed(seat, why, restMs = 10 * 60_000) {
-    seat.failedAt = Date.now()
-    seat.why = why
-    seat.restMs = restMs
+  markFailed(project, why, restMs = 10 * 60_000) {
+    project.failedAt = Date.now()
+    project.why = why
+    project.restMs = restMs
   }
 
-  markOK(seat) {
-    seat.failedAt = 0
-    seat.why = ""
-    seat.ok = true
+  markOK(project) {
+    project.failedAt = 0
+    project.why = ""
+    project.ok = true
   }
 }
 

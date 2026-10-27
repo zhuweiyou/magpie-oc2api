@@ -112,32 +112,37 @@ h2 {
   background: var(--magpie-card, transparent);
 }
 
-.repo a {
+.repo-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  color: var(--magpie-fg, #1c1c1e);
+  flex-wrap: wrap;
 }
 
 .repo-name {
   font-weight: 500;
 }
 
+/* the address is text to select, not a link: a page inside magpie is
+   sandboxed without allow-popups, so a click on one goes nowhere */
 .repo-url {
   color: var(--magpie-accent, #3b82f6);
   font-size: 11.5px;
   font-family: var(--magpie-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   overflow-wrap: anywhere;
-}
-
-.repo a:hover .repo-url {
-  text-decoration: underline;
+  user-select: all;
 }
 
 .repo-say {
   margin: 3px 0 0;
   color: var(--magpie-muted, #6b6b70);
   font-size: 11.5px;
+}
+
+.repo-hint {
+  margin: 2px 0 0;
+  color: var(--magpie-faint, #8a8a90);
+  font-size: 11px;
 }
 
 .error {

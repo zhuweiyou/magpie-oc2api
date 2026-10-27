@@ -1,16 +1,16 @@
 // Tests for the parts that decide things rather than talk to the network:
-// which projects become seats, which seat a request goes to, and what the
+// which projects become projects, which project a request goes to, and what the
 // model list comes to. Run with: npm test
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { Store, safe } from "../store.mjs"
 import { shapeProject } from "../vercel.mjs"
-import { seatsOf, choose, healthy, Seats } from "../seats.mjs"
+import { projectsOf, choose, healthy, Projects } from "../projects.mjs"
 import { client } from "../vercel.mjs"
 import { passes, table, modelEntry, readAny } from "../models.mjs"
 import { _internal } from "../index.mjs"
@@ -19,8 +19,8 @@ import { _internal } from "../index.mjs"
 // a helper that added the prefix would hide whether the filter works.
 const proj = (name) => ({ id: "prj_" + name, name, origin: `https://${name}.vercel.app` })
 
-test("every project whose name mentions oc2api becomes a seat", () => {
-  const seats = seatsOf([
+test("every project whose name mentions oc2api becomes a project", () => {
+  const projects = projectsOf([
     { id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app" },
     { id: "prj_2", name: "oc2api-eu", origin: "https://oc2api-eu.vercel.app" },
     { id: "prj_3", name: "my-oc2api-x", origin: "https://my-oc2api-x.vercel.app" },
@@ -29,15 +29,15 @@ test("every project whose name mentions oc2api becomes a seat", () => {
     { id: "prj_6", name: "oc2api", origin: "https://oc2api.vercel.app" },
   ])
   assert.deepEqual(
-    seats.map((s) => s.name),
+    projects.map((s) => s.name),
     ["oc2api-us", "oc2api-eu", "my-oc2api-x", "OC2API-mixed", "oc2api"],
   )
 })
 
-test("a project with no origin is not a seat", () => {
-  const seats = seatsOf([{ id: "prj_a", name: "oc2api-a", origin: "" }, proj("oc2api-b")])
+test("a project with no origin is not a project", () => {
+  const projects = projectsOf([{ id: "prj_a", name: "oc2api-a", origin: "" }, proj("oc2api-b")])
   assert.deepEqual(
-    seats.map((s) => s.name),
+    projects.map((s) => s.name),
     ["oc2api-b"],
   )
 })
@@ -51,83 +51,80 @@ test("a project's origin is its production alias", () => {
   assert.equal(p.origin, "https://oc2api-us.vercel.app")
 })
 
-test("requests spread over the seats instead of piling on the first", () => {
-  const seats = seatsOf([proj("oc2api-a"), proj("oc2api-b"), proj("oc2api-c")])
+test("requests spread over the projects instead of piling on the first", () => {
+  const projects = projectsOf([proj("oc2api-a"), proj("oc2api-b"), proj("oc2api-c")])
   const taken = []
   for (let i = 0; i < 6; i++) {
-    const s = choose(seats)
+    const s = choose(projects)
     taken.push(s.name)
     s.sent++
   }
-  // three seats, six sends: each takes two, and neighbours differ
+  // three projects, six sends: each takes two, and neighbours differ
   const counts = taken.reduce((m, n) => ({ ...m, [n]: (m[n] ?? 0) + 1 }), {})
   assert.deepEqual(counts, { "oc2api-a": 2, "oc2api-b": 2, "oc2api-c": 2 })
   assert.notEqual(taken[0], taken[1])
 })
 
-test("a seat that is busy elsewhere is left for a free one", () => {
-  const seats = seatsOf([proj("oc2api-a"), proj("oc2api-b")])
-  seats[0].busy = 1
-  assert.equal(choose(seats).name, "oc2api-b")
+test("a project that is busy elsewhere is left for a free one", () => {
+  const projects = projectsOf([proj("oc2api-a"), proj("oc2api-b")])
+  projects[0].busy = 1
+  assert.equal(choose(projects).name, "oc2api-b")
 })
 
-test("a seat that just failed sits out while others are free", () => {
-  const seats = seatsOf([proj("oc2api-a"), proj("oc2api-b")])
-  seats[0].sent = 0
-  seats[0].failedAt = Date.now()
-  assert.equal(healthy(seats[0]), false)
+test("a project that just failed sits out while others are free", () => {
+  const projects = projectsOf([proj("oc2api-a"), proj("oc2api-b")])
+  projects[0].sent = 0
+  projects[0].failedAt = Date.now()
+  assert.equal(healthy(projects[0]), false)
   // b has sent nothing either, but it is the healthy one
-  assert.equal(choose(seats).name, "oc2api-b")
+  assert.equal(choose(projects).name, "oc2api-b")
 })
 
-test("when every seat sits out, one is still tried", () => {
-  const seats = seatsOf([proj("oc2api-a"), proj("oc2api-b")])
-  for (const s of seats) s.failedAt = Date.now()
-  assert.ok(choose(seats), "a request must not be dropped for want of a fresh seat")
+test("when every project sits out, one is still tried", () => {
+  const projects = projectsOf([proj("oc2api-a"), proj("oc2api-b")])
+  for (const s of projects) s.failedAt = Date.now()
+  assert.ok(choose(projects), "a request must not be dropped for want of a fresh project")
 })
 
-test("a seat already tried for this request is avoided", () => {
-  const seats = seatsOf([proj("oc2api-a"), proj("oc2api-b")])
-  const avoid = new Set([seats[0].id])
-  assert.equal(choose(seats, avoid).name, "oc2api-b")
-  avoid.add(seats[1].id)
-  assert.equal(choose(seats, avoid), null)
+test("a project already tried for this request is avoided", () => {
+  const projects = projectsOf([proj("oc2api-a"), proj("oc2api-b")])
+  const avoid = new Set([projects[0].id])
+  assert.equal(choose(projects, avoid).name, "oc2api-b")
+  avoid.add(projects[1].id)
+  assert.equal(choose(projects, avoid), null)
 })
 
-test("a seat that recovers is usable again after the wait", () => {
-  // the wait is the one a seat names (Retry-After), or ten minutes for one
+test("a project that recovers is usable again after the wait", () => {
+  // the wait is the one a project names (Retry-After), or ten minutes for one
   // that named nothing: a spent free tier comes back in hours, not minutes
-  const seats = seatsOf([proj("oc2api-a")])
-  seats[0].failedAt = Date.now() - 130_000
-  assert.equal(healthy(seats[0]), false, "two minutes is inside the default rest")
-  seats[0].failedAt = Date.now() - 11 * 60_000
-  assert.equal(healthy(seats[0]), true)
+  const projects = projectsOf([proj("oc2api-a")])
+  projects[0].failedAt = Date.now() - 130_000
+  assert.equal(healthy(projects[0]), false, "two minutes is inside the default rest")
+  projects[0].failedAt = Date.now() - 11 * 60_000
+  assert.equal(healthy(projects[0]), true)
 })
 
-test("refreshing seats keeps the counters of the ones still there", () => {
-  const seats = new Seats()
-  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-b")]))
-  seats.list[0].sent = 7
-  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-c")]))
-  assert.equal(seats.byId("prj_oc2api-a").sent, 7)
-  assert.equal(seats.byId("prj_oc2api-c").sent, 0)
-  assert.equal(seats.size, 2)
+test("refreshing projects keeps the counters of the ones still there", () => {
+  const projects = new Projects()
+  projects.replace(projectsOf([proj("oc2api-a"), proj("oc2api-b")]))
+  projects.list[0].sent = 7
+  projects.replace(projectsOf([proj("oc2api-a"), proj("oc2api-c")]))
+  assert.equal(projects.byId("prj_oc2api-a").sent, 7)
+  assert.equal(projects.byId("prj_oc2api-c").sent, 0)
+  assert.equal(projects.size, 2)
 })
 
-test("refreshing the project list keeps each seat's key", () => {
-  // the key is read from Vercel on a half-hour timer and the project list
-  // is replaced on a one-minute one: a replace that forgot the key made the
-  // account file report hasKey false for every seat a minute after sign-in
-  const seats = new Seats()
-  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-b")]))
-  seats.list[0].key = "sk-test-1"
-  seats.list[0].ip = "203.0.113.7"
-  seats.list[1].ok = false
-  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-b")]))
-  assert.equal(seats.byId("prj_oc2api-a").key, "sk-test-1", "the key survives the refresh")
-  assert.equal(seats.byId("prj_oc2api-a").ip, "203.0.113.7")
-  assert.equal(seats.byId("prj_oc2api-b").ok, false, "a seat marked down stays down")
-  assert.equal(seats.byId("prj_oc2api-b").key, "", "a seat that never had one has none")
+test("refreshing the project list keeps each project's key", () => {
+  // a replace that forgot the key made the account file report hasKey false
+  // for every project while the key was still in Vercel
+  const projects = new Projects()
+  projects.replace(projectsOf([proj("oc2api-a"), proj("oc2api-b")]))
+  projects.list[0].key = "sk-test-1"
+  projects.list[1].ok = false
+  projects.replace(projectsOf([proj("oc2api-a"), proj("oc2api-b")]))
+  assert.equal(projects.byId("prj_oc2api-a").key, "sk-test-1", "the key survives the refresh")
+  assert.equal(projects.byId("prj_oc2api-b").ok, false, "a project marked down stays down")
+  assert.equal(projects.byId("prj_oc2api-b").key, "", "a project that never had one has none")
 })
 
 test("only the free tier passes, as oc2api filters it", () => {
@@ -137,7 +134,7 @@ test("only the free tier passes, as oc2api filters it", () => {
   assert.equal(passes("text-embedding-3"), false)
 })
 
-test("models carry no single origin, because the seats pick it", () => {
+test("models carry no single origin, because the projects pick it", () => {
   const m = modelEntry("big-pickle")
   assert.equal(m.id, "big-pickle")
   assert.equal(m.api.url, undefined)
@@ -152,7 +149,7 @@ test("the model table is keyed by the ids oc2api serves", () => {
 })
 
 test("a model id carrying a project name never reaches the list", () => {
-  // the shape an earlier version produced, which showed seats in the picker
+  // the shape an earlier version produced, which showed projects in the picker
   const t = table([
     { id: "oc2api-us/big-pickle" },
     { id: "oc2api-eu/beam-free" },
@@ -166,7 +163,7 @@ test("the same model twice is listed once", () => {
   assert.deepEqual(Object.keys(t), ["big-pickle"])
 })
 
-test("the list is read from the first seat that answers", async () => {
+test("the list is read from the first project that answers", async () => {
   const asked = []
   const ids = await readAny(
     [
@@ -175,7 +172,7 @@ test("the list is read from the first seat that answers", async () => {
     ],
     { timeoutMs: 100 },
   ).catch(() => null)
-  // nothing is listening on those hosts, so this is the "no seat answered" path
+  // nothing is listening on those hosts, so this is the "no project answered" path
   assert.equal(ids, null)
 })
 
@@ -216,17 +213,95 @@ test("a refused env pull reads as empty too", async () => {
   }
 })
 
-test("store keeps an account's seats across runs", async () => {
+test("store keeps an account's projects across runs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "oc2api-acct-"))
   try {
     const store = new Store(dir)
     await store.saveAccount("i@example.com", {
-      seats: [{ id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app", hasKey: true }],
+      projects: [{ id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app", hasKey: true }],
     })
     const read = await new Store(dir).account("i@example.com")
     assert.equal(read.email, "i@example.com")
-    assert.equal(read.seats[0].name, "oc2api-us")
-    assert.equal(read.seats[0].hasKey, true)
+    assert.equal(read.projects[0].name, "oc2api-us")
+    assert.equal(read.projects[0].hasKey, true)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("a key is written down once, and read from disk after that", async () => {
+  // Vercel is asked for a key once. After that the plugin answers from its
+  // own directory, so a restart, or Vercel being down, asks nothing.
+  const dir = await mkdtemp(join(tmpdir(), "oc2api-keys-"))
+  try {
+    const store = new Store(dir)
+    assert.equal(await store.key("prj_1"), null, "never asked yet")
+    await store.saveKey("prj_1", "sk-test-1", { source: "vercel" })
+    const read = await new Store(dir).key("prj_1")
+    assert.equal(read.key, "sk-test-1")
+    assert.equal(read.source, "vercel")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("a project with no key is written down as none, not left unanswered", async () => {
+  // "" is an answer: without a record the plugin would ask Vercel again on
+  // every run, forever, for a project that has no API_KEY
+  const dir = await mkdtemp(join(tmpdir(), "oc2api-nokey-"))
+  try {
+    const store = new Store(dir)
+    await store.saveKey("prj_2", "")
+    const read = await new Store(dir).key("prj_2")
+    assert.ok(read, "the answer is kept")
+    assert.equal(read.key, "")
+    assert.deepEqual(Object.keys(await new Store(dir).keys()), ["prj_2"])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("the key file is private to the account that runs magpie", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "oc2api-mode-"))
+  try {
+    const store = new Store(dir)
+    await store.saveKey("prj_3", "sk-test-3")
+    if (process.platform !== "win32") {
+      const st = await stat(join(dir, "oc2api-vercel", "keys", "prj_3.json"))
+      assert.equal(st.mode & 0o777, 0o600, "a key is not for other users to read")
+    }
+    const text = await readFile(join(dir, "oc2api-vercel", "keys", "prj_3.json"), "utf8")
+    assert.match(text, /"key": "sk-test-3"/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("a file v0.2 wrote is read as one list, and the next write drops the copy", async () => {
+  // v0.2 wrote the same projects twice: a `projects` map and a `seats` list.
+  // Reading the file has to find the list either way, and writing it back
+  // has to leave one of them.
+  const dir = await mkdtemp(join(tmpdir(), "oc2api-one-"))
+  try {
+    const path = join(dir, "oc2api-vercel", "accounts", "i@example.com.json")
+    await mkdir(join(dir, "oc2api-vercel", "accounts"), { recursive: true })
+    await writeFile(
+      path,
+      JSON.stringify({
+        email: "i@example.com",
+        projects: { prj_1: { name: "oc2api-us" } },
+        seats: [{ id: "prj_1", name: "oc2api-us", origin: "https://oc2api-us.vercel.app", hasKey: true }],
+      }),
+    )
+    const store = new Store(dir)
+    const read = await store.account("i@example.com")
+    assert.ok(Array.isArray(read.projects), "the list is found in the older field")
+    assert.equal(read.projects[0].name, "oc2api-us")
+
+    await store.saveAccount("i@example.com", { projects: read.projects })
+    const after = JSON.parse(await readFile(path, "utf8"))
+    assert.deepEqual(Object.keys(after).sort(), ["email", "projects", "readAt"])
+    assert.equal(after.projects.length, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -266,10 +341,8 @@ test("hooks are the shapes magpie calls", async () => {
     assert.equal(typeof hooks.auth[name], "function", `auth.${name} is missing`)
   }
   assert.equal(typeof hooks.provider.models, "function")
-  for (const [name, tool] of Object.entries(hooks.tool)) {
-    assert.equal(typeof tool.execute, "function", `${name} has no execute`)
-    assert.ok(name.startsWith("oc2api_"), `${name} is not named for the tool`)
-  }
+  // no tool is injected: what a tool would list is on the account card
+  assert.equal(hooks.tool, undefined, "the plugin registers no tool")
 })
 
 test("no deploy is offered any more: this plugin only reads", async () => {
@@ -278,11 +351,13 @@ test("no deploy is offered any more: this plugin only reads", async () => {
     client: { app: { log() {} } },
     directory: await mkdtemp(join(tmpdir(), "oc2api-nodeploy-")),
   })
-  const names = Object.keys(hooks.tool)
+  const names = Object.keys(hooks.tool ?? {})
   assert.ok(!names.some((n) => /deploy|create|remove|set_env/.test(n)), `still offers ${names.join(", ")}`)
+  // and nothing writes: the hooks a plugin can be given are the reads only
+  for (const name of ["deploy", "create", "remove"]) assert.equal(hooks[name], undefined, `${name} is offered`)
 })
 
-test("the config hook offers the known models before any seat answers", async () => {
+test("the config hook offers the known models before any project answers", async () => {
   const mod = await import("../index.mjs")
   const hooks = await mod.Oc2apiVercelPlugin({
     client: { app: { log() {} } },
@@ -302,7 +377,7 @@ test("the config hook offers the known models before any seat answers", async ()
 
 test("the loader says where requests go, or magpie refuses them outright", async () => {
   // magpie answers "says nowhere to send its requests" when a provider
-  // names no baseURL and its models carry no url: the seats pick an origin
+  // names no baseURL and its models carry no url: the projects pick an origin
   // per request, so this placeholder is the one address magpie can be given
   const mod = await import("../index.mjs")
   const hooks = await mod.Oc2apiVercelPlugin({
@@ -411,6 +486,17 @@ test("an added account is the same row, named by its account", async () => {
       ["oc2api (Vercel)", "i@example.com"],
     ],
   )
+})
+
+test("the page offers no link it cannot open", async () => {
+  // magpie frames a plugin's page with sandbox="allow-scripts" and no
+  // allow-popups: an <a target="_blank"> does nothing there, and a same-frame
+  // navigation has nowhere to go. The addresses are text to copy instead.
+  const html = await readFile(new URL("../page/index.html", import.meta.url), "utf8")
+  assert.equal(/<a\s/i.test(html.replace(/<link\s/gi, "")), false, "the page draws no anchor")
+  for (const url of ["https://github.com/zhuweiyou/oc2api", "https://github.com/zhuweiyou/magpie-oc2api"]) {
+    assert.ok(html.includes(url), `${url} is on the page`)
+  }
 })
 
 test("with no provider of its own yet, the page says where to add one", async () => {

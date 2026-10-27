@@ -1,13 +1,13 @@
 {
   "name": "magpie-oc2api",
-  "version": "0.2.2",
+  "version": "0.4.0",
   "description": "OpenCode / magpie provider plugin: signs in to Vercel and spreads oc2api requests over every oc2api project on that account",
   "type": "module",
   "main": "./index.mjs",
   "exports": "./index.mjs",
   "files": [
     "index.mjs",
-    "seats.mjs",
+    "projects.mjs",
     "models.mjs",
     "vercel.mjs",
     "store.mjs",

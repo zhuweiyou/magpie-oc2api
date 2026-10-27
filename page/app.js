@@ -2,25 +2,24 @@
 //
 // magpie's page sandbox allows no network of its own and hands a page only
 // the reads its package.json declares (magpie.permissions), so this page
-// cannot list seats: it shows the providers and says where the seats are,
-// which is the account card and the oc2api_seats tool. `providers:list` is
-// declared there for it: a read the package leaves out is refused with
-// "{name} doesn't ask to read {what}", which is what the page would show.
+// cannot list projects: it shows the provider and says where they are, which
+// is the account card. `providers:list` is declared there for it: a read the
+// package leaves out is refused with "{name} doesn't ask to read {what}".
 
 const TEXT = {
   en: {
     title: "oc2api on Vercel",
-    lede: "Sign in to Vercel once: every project named oc2api* becomes a seat, rotated automatically.",
+    lede: "Sign in to Vercel once: every project named oc2api* becomes one exit of the same provider, rotated automatically.",
     how: "How it works",
     step1: "Sign in once per Vercel account in the provider row: magpie opens Vercel's own page, nothing is typed here.",
-    step2: "Every Vercel project whose name mentions oc2api is taken as a seat, with its own exit IP and its own API_KEY read from Vercel.",
-    step3: "Requests rotate over the seats, and a seat that is out of its free tier is skipped for the next one.",
+    step2: "Every Vercel project whose name mentions oc2api is used as one exit, with its own API_KEY read from Vercel.",
+    step3: "Requests rotate over them, and one that is out of its free tier is skipped for the next.",
     providers: "This plugin's provider",
     loading: "Reading…",
     none: "Not here yet: add it from the provider row above.",
     mine: "oc2api on Vercel, signed in to Vercel",
     limits:
-      "This page can only read the names of your providers, and names the one this plugin owns: the seats, their exit IPs and their health are on that provider's account card, and in the oc2api_seats tool.",
+      "This page can only read the names of your providers, and names the one this plugin owns. Which projects answered, how many requests each took and whether one is sitting out are on that provider's account card.",
     deploy: "This plugin never deploys or changes a project: it only reads.",
     repos: "The two repositories",
     repoOc2api: "oc2api",
@@ -28,20 +27,21 @@ const TEXT = {
       "The thing you deploy to Vercel: one project per exit, each with its own free tier. Deploy it first; this plugin only reads what it finds.",
     repoPlugin: "magpie-oc2api",
     repoPluginSay: "This plugin: what it does, what it reads, and how to install it in another magpie.",
+    repoHint: "Copy an address into a browser: a page inside magpie can't open one itself.",
   },
   zh: {
     title: "oc2api on Vercel",
-    lede: "登录一次 Vercel：所有名字含 oc2api 的项目都成为一个「号」，自动轮询。",
+    lede: "登录一次 Vercel：所有名字含 oc2api 的项目都成为同一个供应商的出口，自动轮询。",
     how: "怎么用",
     step1: "在供应商那一行按 Vercel 账号登录一次：magpie 会打开 Vercel 自己的页面，这里不用输任何东西。",
-    step2: "该账号下每个名字含 oc2api 的 Vercel 项目都是一个座位，各有自己的出口 IP，API_KEY 从 Vercel 读出。",
-    step3: "请求在座位之间轮询，某个座位免费额度用完就自动跳过、换下一个。",
+    step2: "该账号下每个名字含 oc2api 的 Vercel 项目都是一个出口，API_KEY 从 Vercel 读出后存在本地。",
+    step3: "请求在它们之间轮询，哪个免费额度用完就自动跳过、换下一个。",
     providers: "这个插件的供应商",
     loading: "读取中…",
     none: "还不在这里：在上面那一行添加它。",
     mine: "oc2api on Vercel，已登录 Vercel",
     limits:
-      "这个页面只能读到供应商的名字，只写出这个插件自己的那一个。座位、它们的出口 IP 和健康状态在那个供应商的账号卡片上，以及 oc2api_seats 工具里。",
+      "这个页面只能读到供应商的名字，只写出这个插件自己的那一个。哪些项目答过、各发了多少、有没有在休息，都在那个供应商的账号卡片上。",
     deploy: "这个插件从不部署、也不修改你的项目：它只读。",
     repos: "两个仓库",
     repoOc2api: "oc2api",
@@ -49,6 +49,7 @@ const TEXT = {
       "要部署到 Vercel 的那个：一个项目一个出口，各有自己的免费额度。先部署它，这个插件只是读它扫到的东西。",
     repoPlugin: "magpie-oc2api",
     repoPluginSay: "这个插件本身：做什么、读什么、怎么在另一台 magpie 上装。",
+    repoHint: "把地址复制到浏览器打开：magpie 里的页面自己打不开外链。",
   },
 }
 

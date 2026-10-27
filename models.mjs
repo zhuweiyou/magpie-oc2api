@@ -1,11 +1,11 @@
-// What models the seats serve, and what magpie shows for them.
+// What models the projects serve, and what magpie shows for them.
 //
 // Every project runs the same oc2api, so the list is read from one of them
 // and taken as the list all of them serve. Reading it from every project
 // would say the same thing several times over and cost a request each.
 //
-// KNOWN is only what to show before any seat has answered, so the provider
-// isn't empty while it is being read, and what to keep when a seat can't be
+// KNOWN is only what to show before any project has answered, so the provider
+// isn't empty while it is being read, and what to keep when a project can't be
 // reached at the moment its list was asked for.
 
 export const KNOWN = [
@@ -25,7 +25,7 @@ function detailsOf(id) {
 }
 
 // modelEntry is one model as magpie wants it. Its `api.url` is left out on
-// purpose: the seats pick the origin per request, so a model doesn't belong
+// purpose: the projects pick the origin per request, so a model doesn't belong
 // to one project.
 export function modelEntry(id) {
   const d = detailsOf(id)
@@ -45,7 +45,7 @@ export function modelEntry(id) {
 //
 // An id with a slash in it is refused here: it would be a project name
 // leaked into the model list, which is what an earlier version of this
-// plugin did (`oc2api-us/big-pickle`). The seats are an internal detail and
+// plugin did (`oc2api-us/big-pickle`). The projects are an internal detail and
 // a model is just a model, so nothing above this layer should ever see one.
 export function table(list) {
   const out = {}
@@ -57,7 +57,7 @@ export function table(list) {
   return out
 }
 
-// read asks one seat what it serves. `key` may be empty, for a deployment
+// read asks one project what it serves. `key` may be empty, for a deployment
 // that needs none.
 export async function read(origin, key, { timeoutMs = 8000 } = {}) {
   if (!origin) return null
@@ -86,12 +86,12 @@ export async function read(origin, key, { timeoutMs = 8000 } = {}) {
   return ids.length ? ids : null
 }
 
-// readAny asks the seats in turn until one answers, which is the list they
+// readAny asks the projects in turn until one answers, which is the list they
 // all serve.
-export async function readAny(seats, { timeoutMs = 8000 } = {}) {
-  for (const seat of seats) {
-    const ids = await read(seat.origin, seat.key, { timeoutMs })
-    if (ids) return { ids, from: seat.name }
+export async function readAny(projects, { timeoutMs = 8000 } = {}) {
+  for (const project of projects) {
+    const ids = await read(project.origin, project.key, { timeoutMs })
+    if (ids) return { ids, from: project.name }
   }
   return null
 }
