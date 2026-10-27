@@ -87,12 +87,26 @@ export class Seats {
   }
 
   replace(list) {
-    // keep the counters of seats that are still there, so a refresh doesn't
-    // restart the spreading from the first one
+    // keep what belongs to the seat rather than to this reading of the
+    // project list: the counters, the resting state, and the API_KEY read
+    // from Vercel. Dropping the key here is what made a refresh one minute
+    // later report hasKey false for every seat while the key was still in
+    // Vercel: the key is read on its own half-hour timer, and this list is
+    // replaced on a one-minute one.
     const before = new Map(this.list.map((s) => [s.id, s]))
     this.list = list.map((s) => {
       const old = before.get(s.id)
-      return old ? { ...s, sent: old.sent, failedAt: old.failedAt } : s
+      if (!old) return s
+      return {
+        ...s,
+        key: old.key,
+        sent: old.sent,
+        failedAt: old.failedAt,
+        restMs: old.restMs,
+        ip: old.ip,
+        ok: old.ok,
+        why: old.why,
+      }
     })
     this.readAt = Date.now()
     return this.list

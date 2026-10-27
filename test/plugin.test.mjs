@@ -114,6 +114,22 @@ test("refreshing seats keeps the counters of the ones still there", () => {
   assert.equal(seats.size, 2)
 })
 
+test("refreshing the project list keeps each seat's key", () => {
+  // the key is read from Vercel on a half-hour timer and the project list
+  // is replaced on a one-minute one: a replace that forgot the key made the
+  // account file report hasKey false for every seat a minute after sign-in
+  const seats = new Seats()
+  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-b")]))
+  seats.list[0].key = "sk-test-1"
+  seats.list[0].ip = "203.0.113.7"
+  seats.list[1].ok = false
+  seats.replace(seatsOf([proj("oc2api-a"), proj("oc2api-b")]))
+  assert.equal(seats.byId("prj_oc2api-a").key, "sk-test-1", "the key survives the refresh")
+  assert.equal(seats.byId("prj_oc2api-a").ip, "203.0.113.7")
+  assert.equal(seats.byId("prj_oc2api-b").ok, false, "a seat marked down stays down")
+  assert.equal(seats.byId("prj_oc2api-b").key, "", "a seat that never had one has none")
+})
+
 test("only the free tier passes, as oc2api filters it", () => {
   assert.equal(passes("big-pickle"), true)
   assert.equal(passes("beam-free"), true)
