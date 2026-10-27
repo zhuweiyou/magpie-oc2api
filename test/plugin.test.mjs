@@ -4,7 +4,7 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -305,4 +305,100 @@ test("the loader says where requests go, or magpie refuses them outright", async
   assert.ok(loader.baseURL.length > 0, "a baseURL is required")
   // and no model may pin an origin, since that would defeat the rotation
   assert.equal(modelEntry("big-pickle").api.url, undefined)
+})
+
+test("every read the page asks for is declared for it in package.json", async () => {
+  // magpie answers "{name} doesn't ask to read {what}" for a read the
+  // package's magpie.permissions leaves out: the page then shows that
+  // refusal instead of the provider list, so what app.js asks for and what
+  // package.json declares have to be the same set
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
+  const declared = pkg.magpie?.permissions ?? []
+  const page = await readFile(new URL("../page/app.js", import.meta.url), "utf8")
+  const asked = [...page.matchAll(/magpie\.read\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1])
+  assert.ok(asked.length, "the page reads nothing: the test has drifted from app.js")
+  assert.deepEqual(asked.sort(), declared.slice().sort())
+  assert.ok(declared.includes("providers:list"), "the page lists the providers")
+})
+
+// A fake of the little DOM the page touches, so its rendering can be run
+// here: providers:list is every provider in magpie's window, and this page
+// sits under Plugins as this plugin's own.
+class FakeNode {
+  constructor(tag) {
+    this.tag = tag
+    this.children = []
+    this.className = ""
+    this.textContent = ""
+    this.hidden = false
+    this.dataset = {}
+    this.classList = { add: (c) => (this.className = `${this.className} ${c}`.trim()) }
+  }
+  append(...kids) {
+    this.children.push(...kids)
+  }
+  replaceChildren(...kids) {
+    this.children = kids
+  }
+  // the row's own texts, as the page draws them: the name, then the sub line
+  get texts() {
+    return this.children.flatMap((c) => (c.children.length ? [c.texts] : [c.textContent])).flat(Infinity)
+  }
+}
+
+async function renderPage(providers) {
+  const { runInNewContext } = await import("node:vm")
+  const box = new FakeNode("ul")
+  const error = new FakeNode("p")
+  error.hidden = true // <p class="error" id="error" hidden>
+  const byId = { providers: box, error }
+  const document = {
+    getElementById: (id) => byId[id],
+    querySelectorAll: () => [],
+    createElement: (tag) => new FakeNode(tag),
+    documentElement: {},
+    title: "",
+  }
+  const magpie = { ready: Promise.resolve({ lang: "en" }), read: async () => providers }
+  const code = await readFile(new URL("../page/app.js", import.meta.url), "utf8")
+  runInNewContext(code, { document, magpie, Promise, Error, String, Array, Object })
+  // main() is called, not awaited: two turns let it finish what it awaits
+  await new Promise((r) => setImmediate(r))
+  await new Promise((r) => setImmediate(r))
+  return byId
+}
+
+test("the page shows this plugin's own rows, not every provider in the window", async () => {
+  // what magpie really answers: other plugins' providers are in it too
+  const byId = await renderPage([
+    { id: "codex", name: "Codex" },
+    { id: "workbuddy", name: "WorkBuddy" },
+    { id: "oc2api", name: "oc2api (Vercel)" },
+  ])
+  const rows = byId.providers.children
+  assert.equal(rows.length, 1, `drew ${rows.map((r) => r.texts).join(" | ")}`)
+  assert.deepEqual(rows[0].texts, ["oc2api (Vercel)", "oc2api on Vercel, signed in to Vercel"])
+  assert.equal(byId.error.hidden, true)
+})
+
+test("an added account is the same row, named by its account", async () => {
+  // magpie gives each further account its own provider id: oc2api#<email>
+  const byId = await renderPage([
+    { id: "oc2api", name: "oc2api (Vercel)" },
+    { id: "oc2api#i@example.com", name: "oc2api (Vercel)" },
+    { id: "oc2api-plugin", name: "oc2api" },
+  ])
+  assert.deepEqual(
+    byId.providers.children.map((r) => r.texts),
+    [
+      ["oc2api (Vercel)", "oc2api on Vercel, signed in to Vercel"],
+      ["oc2api (Vercel)", "i@example.com"],
+    ],
+  )
+})
+
+test("with no provider of its own yet, the page says where to add one", async () => {
+  const byId = await renderPage([{ id: "codex", name: "Codex" }])
+  assert.equal(byId.providers.children.length, 1)
+  assert.match(byId.providers.children[0].textContent, /add it from the provider row/)
 })
